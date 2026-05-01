@@ -1,53 +1,107 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useWindowDimensions } from 'react-native';
 import { Skia, type SkPath } from '@shopify/react-native-skia';
 import { useSmartCanvas } from '../Provider';
 
 export const useDrawing = () => {
   const { state, dispatch } = useSmartCanvas();
+  const { width, height } = useWindowDimensions();
   const [currentPath, setCurrentPath] = useState<SkPath | null>(null);
 
-  // Use a ref for the path to keep callback identities stable
   const pathRef = useRef<SkPath | null>(null);
+  const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  const smoothedPoint = useRef<{ x: number; y: number } | null>(null);
 
-  // Keep state in ref for stable callbacks
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  const onStart = useCallback((x: number, y: number) => {
-    const s = stateRef.current;
-    if (
-      s.selectedTool !== 'pen' &&
-      s.selectedTool !== 'eraser' &&
-      s.selectedTool !== 'brush'
-    )
-      return;
+  const getSymmetricPoints = (x: number, y: number) => {
+    const points = [{ x, y }];
+    const centerX = width / 2;
+    const centerY = height / 2;
 
-    const path = Skia.Path.Make();
-    path.moveTo(x, y);
-    pathRef.current = path;
-    setCurrentPath(path);
-  }, []);
+    if (stateRef.current.symmetry === 'vertical') {
+      points.push({ x: 2 * centerX - x, y });
+    } else if (stateRef.current.symmetry === 'horizontal') {
+      points.push({ x, y: 2 * centerY - y });
+    } else if (stateRef.current.symmetry === 'radial') {
+      points.push({ x: 2 * centerX - x, y });
+      points.push({ x, y: 2 * centerY - y });
+      points.push({ x: 2 * centerX - x, y: 2 * centerY - y });
+    }
+    return points;
+  };
 
-  const onActive = useCallback((x: number, y: number) => {
-    const s = stateRef.current;
-    const path = pathRef.current;
-    if (
-      !path ||
-      (s.selectedTool !== 'pen' &&
+  const onStart = useCallback(
+    (x: number, y: number) => {
+      const s = stateRef.current;
+      if (
+        s.selectedTool !== 'pen' &&
         s.selectedTool !== 'eraser' &&
-        s.selectedTool !== 'brush')
-    )
-      return;
+        s.selectedTool !== 'brush'
+      )
+        return;
 
-    path.lineTo(x, y);
+      const path = Skia.Path.Make();
+      const points = getSymmetricPoints(x, y);
+      points.forEach((p) => path.moveTo(p.x, p.y));
 
-    // We need to trigger a re-render. Since Skia paths are mutable,
-    // we can just create a shallow copy or a new state reference.
-    // .copy() is efficient in Skia.
-    setCurrentPath(path.copy());
-  }, []);
+      pathRef.current = path;
+      lastPoint.current = { x, y };
+      smoothedPoint.current = { x, y };
+      setCurrentPath(path);
+    },
+    [width, height]
+  );
+
+  const onActive = useCallback(
+    (x: number, y: number) => {
+      const s = stateRef.current;
+      const path = pathRef.current;
+      if (
+        !path ||
+        !lastPoint.current ||
+        (s.selectedTool !== 'pen' &&
+          s.selectedTool !== 'eraser' &&
+          s.selectedTool !== 'brush')
+      )
+        return;
+
+      let targetX = x;
+      let targetY = y;
+
+      // Predictive Stroke (Smoothing) - Simple EMA
+      if (s.predictiveStroke && smoothedPoint.current) {
+        const factor = 0.2; // Smoothing factor
+        targetX = smoothedPoint.current.x + (x - smoothedPoint.current.x) * factor;
+        targetY = smoothedPoint.current.y + (y - smoothedPoint.current.y) * factor;
+        smoothedPoint.current = { x: targetX, y: targetY };
+      }
+
+      const currentPoints = getSymmetricPoints(targetX, targetY);
+      const prevPoints = getSymmetricPoints(
+        lastPoint.current.x,
+        lastPoint.current.y
+      );
+
+      // In Skia, if we have multiple "sub-paths" in one SkPath object,
+      // we need to be careful with lineTo.
+      // For symmetry, we actually want separate line segments.
+      for (let i = 0; i < currentPoints.length; i++) {
+        const p = currentPoints[i]!;
+        const prev = prevPoints[i]!;
+        // Move to previous point to ensure sub-path continuity
+        path.moveTo(prev.x, prev.y);
+        path.lineTo(p.x, p.y);
+      }
+
+      lastPoint.current = { x: targetX, y: targetY };
+      setCurrentPath(path.copy());
+    },
+    [width, height]
+  );
 
   const onEnd = useCallback(() => {
     const s = stateRef.current;
@@ -72,6 +126,8 @@ export const useDrawing = () => {
     });
 
     pathRef.current = null;
+    lastPoint.current = null;
+    smoothedPoint.current = null;
     setCurrentPath(null);
   }, [dispatch]);
 

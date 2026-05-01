@@ -1,16 +1,17 @@
 import React from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import { View, StyleSheet, StatusBar, TouchableOpacity, Text } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { CanvasView } from './components/CanvasView';
 import { Topbar } from './components/Topbar';
-import { QuickActions, ZoomControls } from './components/QuickActions';
-import { PropertiesPanel } from './components/PropertiesPanel';
 import { SmartCanvasProvider, useSmartCanvas } from './Provider';
 import type { CanvasEditorProps } from './types';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Sidebar } from './components/Sidebar';
+import { RadialMenu } from './components/RadialMenu';
+
 const EditorLayout: React.FC<CanvasEditorProps> = (_props) => {
-  const { state, theme } = useSmartCanvas();
+  const { state, theme, dispatch } = useSmartCanvas();
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -24,15 +25,20 @@ const EditorLayout: React.FC<CanvasEditorProps> = (_props) => {
 
         {/* Floating UI Layers */}
         <SafeAreaView style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          <Topbar />
-
-          <View style={styles.floatingContent} pointerEvents="box-none">
-            {/* Consolidated tools into the bottom PropertiesPanel as requested */}
-            <QuickActions />
-            <ZoomControls />
-          </View>
-
-          <PropertiesPanel />
+          {state.showUI ? (
+            <>
+              <Topbar />
+              <Sidebar />
+              <RadialMenu />
+            </>
+          ) : (
+            <TouchableOpacity
+              style={styles.showUIButton}
+              onPress={() => dispatch({ type: 'TOGGLE_UI' })}
+            >
+              <Text style={{ fontSize: 20 }}>👁️</Text>
+            </TouchableOpacity>
+          )}
         </SafeAreaView>
       </View>
     </GestureHandlerRootView>
@@ -66,5 +72,17 @@ const styles = StyleSheet.create({
   floatingContent: {
     flex: 1,
     position: 'relative',
+  },
+  showUIButton: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
   },
 });

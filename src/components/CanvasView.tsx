@@ -175,13 +175,11 @@ export const CanvasView: React.FC = () => {
   const stateRef = React.useRef(state);
   React.useEffect(() => {
     stateRef.current = state;
-    // When elements update in JS state, we can clear the UI-thread offsets.
-    // This provides a seamless transition from UI-thread drag to JS-thread state.
     if (activeDragIdSV.value) {
       dragOffset.value = { x: 0, y: 0 };
       activeDragIdSV.value = null;
     }
-  }, [state, state.elements, activeDragIdSV, dragOffset]);
+  }, [state, activeDragIdSV, dragOffset]);
 
   // Sync state to shared values for UI thread access
   const selectedToolSV = useSharedValue(state.selectedTool);
@@ -190,43 +188,41 @@ export const CanvasView: React.FC = () => {
   }, [state.selectedTool, selectedToolSV]);
 
   const elementMetadata = useMemo(() => {
-    return state.elements.map((el) => {
-      if (el.type === 'path' || el.type === 'eraser' || el.type === 'brush') {
-        const path = Skia.Path.MakeFromSVGString(el.path!);
-        const bounds = path
-          ? path.getBounds()
-          : { x: 0, y: 0, width: 0, height: 0 };
-        return {
+    const allElements: any[] = [];
+    state.layers.forEach((layer) => {
+      if (!layer.visible) return;
+      layer.elements.forEach((el) => {
+        let bounds = { x: 0, y: 0, width: 0, height: 0 };
+        if (el.type === 'path' || el.type === 'eraser' || el.type === 'brush') {
+          const path = Skia.Path.MakeFromSVGString(el.path!);
+          bounds = path ? path.getBounds() : bounds;
+        } else if (el.type === 'text') {
+          bounds = {
+            x: 0,
+            y: 0,
+            width: (el.text?.length || 0) * (el.fontSize || 20) * 0.6,
+            height: el.fontSize || 20,
+          };
+        } else {
+          bounds = {
+            x: 0,
+            y: 0,
+            width: el.width || 0,
+            height: el.height || 0,
+          };
+        }
+        allElements.push({
           id: el.id,
           type: el.type,
           x: el.x || 0,
           y: el.y || 0,
-          opacity: el.opacity,
+          opacity: el.opacity * layer.opacity,
           bounds,
-        };
-      }
-      if (el.type === 'text') {
-        const width = (el.text?.length || 0) * (el.fontSize || 20) * 0.6;
-        const height = el.fontSize || 20;
-        return {
-          id: el.id,
-          type: el.type,
-          x: el.x || 0,
-          y: el.y || 0,
-          opacity: el.opacity,
-          bounds: { x: 0, y: 0, width, height },
-        };
-      }
-      return {
-        id: el.id,
-        type: el.type,
-        x: el.x || 0,
-        y: el.y || 0,
-        opacity: el.opacity,
-        bounds: { x: 0, y: 0, width: el.width || 0, height: el.height || 0 },
-      };
+        });
+      });
     });
-  }, [state.elements]);
+    return allElements;
+  }, [state.layers]);
 
   const elementMetadataSV = useSharedValue(elementMetadata);
   React.useEffect(() => {
@@ -250,8 +246,6 @@ export const CanvasView: React.FC = () => {
     return [{ translateX: 0 }, { translateY: 0 }];
   }, [state.selectedElementId]);
 
-  // Removed old refs as they are now Shared Values
-
   const findElementAtUI = React.useCallback(
     (x: number, y: number) => {
       'worklet';
@@ -265,7 +259,6 @@ export const CanvasView: React.FC = () => {
         const oy = el.y;
         const padding = 20;
 
-        // Hit test logic
         if (el.type === 'rect') {
           if (
             x >= ox &&
@@ -310,7 +303,6 @@ export const CanvasView: React.FC = () => {
               elementStartPos.value = { x: el.x, y: el.y };
             }
           }
-          // Set tap candidate for select tool
           tapCandidateIdSV.value = id;
         } else if (
           selectedToolSV.value === 'pen' ||
@@ -347,20 +339,14 @@ export const CanvasView: React.FC = () => {
           if (isDraggingSV.value && activeDragIdSV.value) {
             const dx = dragOffset.value.x;
             const dy = dragOffset.value.y;
-            const finalX = elementStartPos.value.x + dx;
-            const finalY = elementStartPos.value.y + dy;
-
             runOnJS(dispatch)({
               type: 'FINISH_MOVE',
               id: activeDragIdSV.value,
-              x: finalX,
-              y: finalY,
+              x: elementStartPos.value.x + dx,
+              y: elementStartPos.value.y + dy,
               originalX: elementStartPos.value.x,
               originalY: elementStartPos.value.y,
             });
-            // We NO LONGER clear dragOffset and activeDragIdSV here.
-            // They are cleared in the useEffect above once the state has updated,
-            // which prevents the element from "snapping back" during the bridge delay.
           } else {
             runOnJS(dispatch)({
               type: 'SELECT_ELEMENT',
@@ -425,7 +411,6 @@ export const CanvasView: React.FC = () => {
         ) {
           runOnJS(onEnd)();
         }
-
         isDraggingSV.value = false;
       });
   }, [
@@ -444,24 +429,38 @@ export const CanvasView: React.FC = () => {
     findElementAtUI,
   ]);
 
-  const renderedElements = useMemo(() => {
-    return state.elements.map((el) => (
-      <RenderElement
-        key={el.id}
-        el={el}
-        dragOffset={dragOffset}
-        activeDragIdSV={activeDragIdSV}
-        elementStartPos={elementStartPos}
-      />
-    ));
-  }, [state.elements, dragOffset, activeDragIdSV, elementStartPos]);
+  const renderedLayers = useMemo(() => {
+    // Reverse layers for rendering (bottom to top)
+    return [...state.layers].reverse().map((layer) => {
+      if (!layer.visible) return null;
+      return (
+        <Group key={layer.id} opacity={layer.opacity}>
+          {layer.elements.map((el) => (
+            <RenderElement
+              key={el.id}
+              el={el}
+              dragOffset={dragOffset}
+              activeDragIdSV={activeDragIdSV}
+              elementStartPos={elementStartPos}
+            />
+          ))}
+        </Group>
+      );
+    });
+  }, [state.layers, dragOffset, activeDragIdSV, elementStartPos]);
 
   const selectionOverlay = useMemo(() => {
     if (!state.selectedElementId) return null;
-    const el = state.elements.find((e) => e.id === state.selectedElementId);
-    if (!el || el.opacity === 0) return null;
+    let selectedEl: any = null;
+    state.layers.forEach((l) => {
+      const found = l.elements.find((e) => e.id === state.selectedElementId);
+      if (found) selectedEl = found;
+    });
+
+    if (!selectedEl || selectedEl.opacity === 0) return null;
 
     let bounds = { x: 0, y: 0, width: 0, height: 0 };
+    const el = selectedEl;
     if (el.type === 'rect' || el.type === 'image' || el.type === 'sticker') {
       bounds = {
         x: el.x!,
@@ -484,11 +483,9 @@ export const CanvasView: React.FC = () => {
       const skPath = Skia.Path.MakeFromSVGString(el.path!);
       if (skPath) {
         const skBounds = skPath.getBounds();
-        const offsetX = el.x || 0;
-        const offsetY = el.y || 0;
         bounds = {
-          x: skBounds.x + offsetX,
-          y: skBounds.y + offsetY,
+          x: skBounds.x + (el.x || 0),
+          y: skBounds.y + (el.y || 0),
           width: skBounds.width,
           height: skBounds.height,
         };
@@ -496,10 +493,8 @@ export const CanvasView: React.FC = () => {
     }
 
     const pad = 4;
-
     return (
       <Group transform={selectionTransform}>
-        {/* Main Selection Border */}
         <Rect
           x={bounds.x - pad}
           y={bounds.y - pad}
@@ -509,7 +504,6 @@ export const CanvasView: React.FC = () => {
           style="stroke"
           strokeWidth={2}
         />
-        {/* Corner Handles */}
         <Circle cx={bounds.x - pad} cy={bounds.y - pad} r={5} color="#FFF" />
         <Circle
           cx={bounds.x - pad}
@@ -519,7 +513,6 @@ export const CanvasView: React.FC = () => {
           style="stroke"
           strokeWidth={1.5}
         />
-
         <Circle
           cx={bounds.x + bounds.width + pad}
           cy={bounds.y - pad}
@@ -534,7 +527,6 @@ export const CanvasView: React.FC = () => {
           style="stroke"
           strokeWidth={1.5}
         />
-
         <Circle
           cx={bounds.x - pad}
           cy={bounds.y + bounds.height + pad}
@@ -549,7 +541,6 @@ export const CanvasView: React.FC = () => {
           style="stroke"
           strokeWidth={1.5}
         />
-
         <Circle
           cx={bounds.x + bounds.width + pad}
           cy={bounds.y + bounds.height + pad}
@@ -566,24 +557,20 @@ export const CanvasView: React.FC = () => {
         />
       </Group>
     );
-  }, [state.selectedElementId, state.elements, selectionTransform]);
+  }, [state.selectedElementId, state.layers, selectionTransform]);
 
   const renderGrid = useMemo(() => {
     if (!state.showGrid) return null;
     const path = Skia.Path.Make();
     const size = state.gridSize;
-    const W = 2000; // Assume large workspace
-    const H = 2000;
-
-    for (let x = 0; x <= W; x += size) {
+    for (let x = 0; x <= 2000; x += size) {
       path.moveTo(x, 0);
-      path.lineTo(x, H);
+      path.lineTo(x, 2000);
     }
-    for (let y = 0; y <= H; y += size) {
+    for (let y = 0; y <= 2000; y += size) {
       path.moveTo(0, y);
-      path.lineTo(W, y);
+      path.lineTo(2000, y);
     }
-
     return (
       <Path
         path={path}
@@ -594,6 +581,9 @@ export const CanvasView: React.FC = () => {
     );
   }, [state.showGrid, state.gridSize, state.isDarkMode]);
 
+  const isEmpty =
+    state.layers.every((l) => l.elements.length === 0) && !currentPath;
+
   return (
     <GestureDetector gesture={gesture}>
       <View
@@ -602,7 +592,7 @@ export const CanvasView: React.FC = () => {
         <Canvas style={styles.canvas}>
           {renderGrid}
           <Group layer>
-            {renderedElements}
+            {renderedLayers}
             {currentPath && (
               <Path
                 path={currentPath}
@@ -634,22 +624,20 @@ export const CanvasView: React.FC = () => {
                 ) : null}
               </Path>
             )}
-            {/* Selection Highlight ALWAYS on top */}
             {selectionOverlay}
           </Group>
         </Canvas>
 
-        {state.elements.filter((e) => e.opacity > 0).length === 0 &&
-          !currentPath && (
-            <View style={styles.overlay} pointerEvents="none">
-              <Text style={[styles.overlayTitle, { color: theme.sub }]}>
-                Start Creating
-              </Text>
-              <Text style={[styles.overlaySub, { color: theme.sub }]}>
-                Use the tools below to draw or add shapes
-              </Text>
-            </View>
-          )}
+        {isEmpty && (
+          <View style={styles.overlay} pointerEvents="none">
+            <Text style={[styles.overlayTitle, { color: theme.sub }]}>
+              Start Creating
+            </Text>
+            <Text style={[styles.overlaySub, { color: theme.sub }]}>
+              Use the tools below to draw or add shapes
+            </Text>
+          </View>
+        )}
       </View>
     </GestureDetector>
   );

@@ -33,14 +33,25 @@ interface Element {
   assetId?: string;
 }
 
+export interface Layer {
+  id: string;
+  name: string;
+  elements: Element[];
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  // blendMode: string; // We'll use string for now or Skia BlendMode
+}
+
 interface State {
   selectedTool: string;
-  elements: Element[];
+  layers: Layer[];
+  activeLayerId: string;
   selectedElementId: string | null;
   isDarkMode: boolean;
   showProperties: boolean;
-  past: Element[][];
-  future: Element[][];
+  past: Layer[][]; // Past states of layers
+  future: Layer[][];
   canvasBackground: string;
   activeColor: string;
   activeStrokeWidth: number;
@@ -52,6 +63,11 @@ interface State {
   activeFontFamily: string;
   showGrid: boolean;
   gridSize: number;
+  // Sketchbook specific
+  symmetry: 'none' | 'vertical' | 'horizontal' | 'radial';
+  predictiveStroke: boolean;
+  showUI: boolean;
+  showSidebar: boolean;
 }
 
 type Action =
@@ -77,6 +93,16 @@ type Action =
   | { type: 'MOVE_TO_FRONT'; id: string }
   | { type: 'MOVE_TO_BACK'; id: string }
   | { type: 'SET_GRID'; show: boolean; size?: number }
+  | { type: 'TOGGLE_UI' }
+  | { type: 'TOGGLE_SIDEBAR' }
+  | { type: 'SET_SYMMETRY'; symmetry: State['symmetry'] }
+  | { type: 'TOGGLE_PREDICTIVE_STROKE' }
+  // Layer actions
+  | { type: 'ADD_LAYER' }
+  | { type: 'DELETE_LAYER'; id: string }
+  | { type: 'SET_ACTIVE_LAYER'; id: string }
+  | { type: 'UPDATE_LAYER'; id: string; updates: Partial<Layer> }
+  | { type: 'REORDER_LAYERS'; layers: Layer[] }
   | {
       type: 'SET_ACTIVE_PROPERTY';
       updates: Partial<{
@@ -91,9 +117,19 @@ type Action =
       }>;
     };
 
+const defaultLayer: Layer = {
+  id: 'layer-1',
+  name: 'Layer 1',
+  elements: [],
+  visible: true,
+  locked: false,
+  opacity: 1,
+};
+
 const initialState: State = {
   selectedTool: 'pen',
-  elements: [],
+  layers: [defaultLayer],
+  activeLayerId: 'layer-1',
   selectedElementId: null,
   isDarkMode: true,
   showProperties: false,
@@ -110,6 +146,10 @@ const initialState: State = {
   activeFontFamily: 'system-ui',
   showGrid: false,
   gridSize: 20,
+  symmetry: 'none',
+  predictiveStroke: true,
+  showUI: true,
+  showSidebar: false,
 };
 
 const SmartCanvasContext = createContext<
@@ -127,16 +167,22 @@ const canvasReducer = (state: State, action: Action): State => {
     case 'SET_TOOL':
       return { ...state, selectedTool: action.tool };
 
-    case 'ADD_ELEMENT':
+    case 'ADD_ELEMENT': {
+      const newLayers = state.layers.map((layer) =>
+        layer.id === state.activeLayerId
+          ? { ...layer, elements: [...layer.elements, action.element] }
+          : layer
+      );
       return {
         ...state,
-        past: [...state.past, state.elements],
-        elements: [...state.elements, action.element],
+        past: [...state.past, state.layers],
+        layers: newLayers,
         future: [],
         selectedElementId: action.select
           ? action.element.id
           : state.selectedElementId,
       };
+    }
 
     case 'SELECT_ELEMENT':
       return {
@@ -144,39 +190,53 @@ const canvasReducer = (state: State, action: Action): State => {
         selectedElementId: action.id,
       };
 
-    case 'UPDATE_ELEMENT':
-      const newElements = state.elements.map((el) =>
-        el.id === action.id ? { ...el, ...action.updates } : el
-      );
+    case 'UPDATE_ELEMENT': {
+      const newLayers = state.layers.map((layer) => ({
+        ...layer,
+        elements: layer.elements.map((el) =>
+          el.id === action.id ? { ...el, ...action.updates } : el
+        ),
+      }));
       return {
         ...state,
-        past: [...state.past, state.elements],
-        elements: newElements,
+        past: [...state.past, state.layers],
+        layers: newLayers,
         future: [],
       };
+    }
 
-    case 'MOVE_ELEMENT':
-      // Lightweight move - NO undo history push (called every frame during drag)
-      return {
-        ...state,
-        elements: state.elements.map((el) =>
+    case 'MOVE_ELEMENT': {
+      const newLayers = state.layers.map((layer) => ({
+        ...layer,
+        elements: layer.elements.map((el) =>
           el.id === action.id ? { ...el, x: action.x, y: action.y } : el
         ),
+      }));
+      return {
+        ...state,
+        layers: newLayers,
       };
+    }
 
     case 'FINISH_MOVE': {
-      // Build the pre-drag snapshot using originalX/originalY so undo reverts to before the drag
-      const preDragSnapshot = state.elements.map((el) =>
-        el.id === action.id
-          ? { ...el, x: action.originalX, y: action.originalY }
-          : el
-      );
+      const preDragSnapshot = state.layers.map((layer) => ({
+        ...layer,
+        elements: layer.elements.map((el) =>
+          el.id === action.id
+            ? { ...el, x: action.originalX, y: action.originalY }
+            : el
+        ),
+      }));
+      const newLayers = state.layers.map((layer) => ({
+        ...layer,
+        elements: layer.elements.map((el) =>
+          el.id === action.id ? { ...el, x: action.x, y: action.y } : el
+        ),
+      }));
       return {
         ...state,
         past: [...state.past, preDragSnapshot],
-        elements: state.elements.map((el) =>
-          el.id === action.id ? { ...el, x: action.x, y: action.y } : el
-        ),
+        layers: newLayers,
         future: [],
       };
     }
@@ -188,8 +248,8 @@ const canvasReducer = (state: State, action: Action): State => {
       return {
         ...state,
         past: state.past.slice(0, -1),
-        elements: previous,
-        future: [state.elements, ...state.future],
+        layers: previous,
+        future: [state.layers, ...state.future],
         selectedElementId: null,
       };
 
@@ -199,37 +259,51 @@ const canvasReducer = (state: State, action: Action): State => {
       if (!next) return state;
       return {
         ...state,
-        past: [...state.past, state.elements],
-        elements: next,
+        past: [...state.past, state.layers],
+        layers: next,
         future: state.future.slice(1),
         selectedElementId: null,
       };
 
-    case 'MOVE_TO_FRONT':
-      const elementToFront = state.elements.find((el) => el.id === action.id);
-      if (!elementToFront) return state;
+    case 'MOVE_TO_FRONT': {
+      const newLayers = state.layers.map((layer) => {
+        const element = layer.elements.find((el) => el.id === action.id);
+        if (!element) return layer;
+        return {
+          ...layer,
+          elements: [
+            ...layer.elements.filter((el) => el.id !== action.id),
+            element,
+          ],
+        };
+      });
       return {
         ...state,
-        past: [...state.past, state.elements],
-        elements: [
-          ...state.elements.filter((el) => el.id !== action.id),
-          elementToFront,
-        ],
+        past: [...state.past, state.layers],
+        layers: newLayers,
         future: [],
       };
+    }
 
-    case 'MOVE_TO_BACK':
-      const elementToBack = state.elements.find((el) => el.id === action.id);
-      if (!elementToBack) return state;
+    case 'MOVE_TO_BACK': {
+      const newLayers = state.layers.map((layer) => {
+        const element = layer.elements.find((el) => el.id === action.id);
+        if (!element) return layer;
+        return {
+          ...layer,
+          elements: [
+            element,
+            ...layer.elements.filter((el) => el.id !== action.id),
+          ],
+        };
+      });
       return {
         ...state,
-        past: [...state.past, state.elements],
-        elements: [
-          elementToBack,
-          ...state.elements.filter((el) => el.id !== action.id),
-        ],
+        past: [...state.past, state.layers],
+        layers: newLayers,
         future: [],
       };
+    }
 
     case 'SET_GRID':
       return {
@@ -252,6 +326,71 @@ const canvasReducer = (state: State, action: Action): State => {
 
     case 'SET_ACTIVE_PROPERTY':
       return { ...state, ...action.updates };
+
+    case 'TOGGLE_UI':
+      return { ...state, showUI: !state.showUI };
+
+    case 'TOGGLE_SIDEBAR':
+      return { ...state, showSidebar: !state.showSidebar };
+
+    case 'SET_SYMMETRY':
+      return { ...state, symmetry: action.symmetry };
+
+    case 'TOGGLE_PREDICTIVE_STROKE':
+      return { ...state, predictiveStroke: !state.predictiveStroke };
+
+    case 'ADD_LAYER': {
+      const newLayer: Layer = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: `Layer ${state.layers.length + 1}`,
+        elements: [],
+        visible: true,
+        locked: false,
+        opacity: 1,
+      };
+      return {
+        ...state,
+        past: [...state.past, state.layers],
+        layers: [newLayer, ...state.layers], // Add to top
+        activeLayerId: newLayer.id,
+        future: [],
+      };
+    }
+
+    case 'DELETE_LAYER':
+      if (state.layers.length <= 1) return state;
+      const remainingLayers = state.layers.filter((l) => l.id !== action.id);
+      return {
+        ...state,
+        past: [...state.past, state.layers],
+        layers: remainingLayers,
+        activeLayerId:
+          state.activeLayerId === action.id
+            ? remainingLayers[0]!.id
+            : state.activeLayerId,
+        future: [],
+      };
+
+    case 'SET_ACTIVE_LAYER':
+      return { ...state, activeLayerId: action.id };
+
+    case 'UPDATE_LAYER':
+      return {
+        ...state,
+        past: [...state.past, state.layers],
+        layers: state.layers.map((l) =>
+          l.id === action.id ? { ...l, ...action.updates } : l
+        ),
+        future: [],
+      };
+
+    case 'REORDER_LAYERS':
+      return {
+        ...state,
+        past: [...state.past, state.layers],
+        layers: action.layers,
+        future: [],
+      };
 
     default:
       return state;
@@ -277,9 +416,14 @@ export const SmartCanvasProvider: React.FC<{
     ...initialState,
     isDarkMode: darkMode !== undefined ? darkMode : initialState.isDarkMode,
     canvasBackground: backgroundColor || initialState.canvasBackground,
-    elements: initialSvg
-      ? parseSVGToElements(initialSvg)
-      : initialElements || initialState.elements,
+    layers: [
+      {
+        ...initialState.layers[0]!,
+        elements: initialSvg
+          ? parseSVGToElements(initialSvg)
+          : initialElements || [],
+      },
+    ],
   });
 
   React.useEffect(() => {

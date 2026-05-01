@@ -28,26 +28,34 @@ const PRESET_COLORS = [
   '#94A3B8',
 ];
 
-export const PropertiesPanel: React.FC = () => {
+export const PropertiesPanel: React.FC<{ isEmbedded?: boolean }> = ({ isEmbedded = false }) => {
   const { state, dispatch, theme } = useSmartCanvas();
   const [activeTab, setActiveTab] = useState('Style');
 
   const translateY = useSharedValue(400);
 
   useEffect(() => {
-    translateY.value = withSpring(state.showProperties ? 0 : 330, {
-      damping: 20,
-      stiffness: 90,
-    });
-  }, [state.showProperties, translateY]);
+    if (!isEmbedded) {
+      translateY.value = withSpring(state.showProperties ? 0 : 330, {
+        damping: 20,
+        stiffness: 90,
+      });
+    }
+  }, [state.showProperties, translateY, isEmbedded]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+    transform: [{ translateY: isEmbedded ? 0 : translateY.value }],
   }));
 
   const selectedElement = useMemo(
-    () => state.elements.find((el) => el.id === state.selectedElementId),
-    [state.elements, state.selectedElementId]
+    () => {
+      for (const layer of state.layers) {
+        const found = layer.elements.find((el) => el.id === state.selectedElementId);
+        if (found) return found;
+      }
+      return null;
+    },
+    [state.layers, state.selectedElementId]
   );
 
   const tabs = useMemo(() => {
@@ -62,12 +70,15 @@ export const PropertiesPanel: React.FC = () => {
       selectedElement?.type === 'sticker' ||
       state.selectedTool === 'image' ||
       state.selectedTool === 'stickers';
+    const isDrawing = ['pen', 'brush', 'marker', 'airbrush', 'fineliner'].includes(state.selectedTool);
 
-    if (isText) return ['Text', 'Style', 'Arrange', 'Canvas'];
-    if (isShape) return ['Shape', 'Style', 'Arrange', 'Canvas'];
-    if (isImage) return ['Image', 'Style', 'Arrange', 'Canvas'];
-
-    return ['Style', 'Stroke', 'Arrange', 'Canvas'];
+    const baseTabs = [];
+    if (isText) baseTabs.push('Text');
+    if (isShape) baseTabs.push('Shape');
+    if (isImage) baseTabs.push('Image');
+    if (isDrawing) baseTabs.push('Brushes');
+    
+    return [...baseTabs, 'Style', 'Stroke', 'Arrange', 'Canvas'];
   }, [selectedElement, state.selectedTool]);
 
   useEffect(() => {
@@ -89,6 +100,9 @@ export const PropertiesPanel: React.FC = () => {
   const isToolWithGlobalProperties = [
     'pen',
     'brush',
+    'marker',
+    'airbrush',
+    'fineliner',
     'shape',
     'text',
     'stickers',
@@ -190,33 +204,50 @@ export const PropertiesPanel: React.FC = () => {
     }
   };
 
+  const brushPresets = [
+    { id: 'pen', name: 'Pencil', icon: '✏️', strokeWidth: 2, roughness: 1, blur: 0 },
+    { id: 'fineliner', name: 'Fine Liner', icon: '🖋️', strokeWidth: 1, roughness: 0, blur: 0 },
+    { id: 'marker', name: 'Marker', icon: '🖍️', strokeWidth: 8, roughness: 0, blur: 1, opacity: 0.7 },
+    { id: 'brush', name: 'Paint Brush', icon: '🖌️', strokeWidth: 12, roughness: 0, blur: 4 },
+    { id: 'airbrush', name: 'Airbrush', icon: '💨', strokeWidth: 20, roughness: 0, blur: 10, opacity: 0.4 },
+  ];
+
+  const handlePresetSelect = (preset: typeof brushPresets[0]) => {
+    dispatch({ type: 'SET_TOOL', tool: preset.id });
+    dispatch({
+      type: 'SET_ACTIVE_PROPERTY',
+      updates: {
+        activeStrokeWidth: preset.strokeWidth,
+        activeRoughness: preset.roughness,
+        activeBlur: preset.blur,
+        activeOpacity: preset.opacity ?? state.activeOpacity,
+      },
+    });
+  };
+
   const allTools = [
     { id: 'select', icon: '🎯', label: 'Select' },
-    { id: 'pen', icon: '✏️', label: 'Pencil' },
-    { id: 'brush', icon: '🖌️', label: 'Brush' },
+    { id: 'pen', icon: '✏️', label: 'Tools' },
     { id: 'eraser', icon: '🧽', label: 'Eraser' },
     { id: 'shape', icon: '⬛', label: 'Shape' },
     { id: 'text', icon: 'T', label: 'Text' },
     { id: 'image', icon: '🖼️', label: 'Image' },
     { id: 'stickers', icon: '😊', label: 'Stickers' },
     { id: 'canvas', icon: '🖼️', label: 'Canvas' },
-    { id: 'layers', icon: '🥞', label: 'Layers' },
   ];
 
   return (
-    <>
-      {/* Removed floating edit button as tools are now always visible */}
+    <View style={!isEmbedded ? styles.outerContainer : styles.embeddedOuterContainer} pointerEvents={isEmbedded ? 'auto' : 'box-none'}>
+      <Animated.View
+        style={[
+          !isEmbedded ? styles.propertiesContainer : styles.embeddedPropertiesContainer,
+          { backgroundColor: isEmbedded ? 'transparent' : theme.panel, borderTopColor: isEmbedded ? 'transparent' : theme.border },
+          animatedStyle,
+        ]}
+      >
+        {!isEmbedded && <View style={styles.handle} />}
 
-      <View style={styles.outerContainer} pointerEvents="box-none">
-        <Animated.View
-          style={[
-            styles.propertiesContainer,
-            { backgroundColor: theme.panel, borderTopColor: theme.border },
-            animatedStyle,
-          ]}
-        >
-          <View style={styles.handle} />
-
+        {!isEmbedded && (
           <View style={styles.header}>
             <Text style={[styles.title, { color: theme.text }]}>
               {showElementProperties
@@ -234,33 +265,34 @@ export const PropertiesPanel: React.FC = () => {
               <Text style={[styles.closeIcon, { color: theme.text }]}>✕</Text>
             </TouchableOpacity>
           </View>
+        )}
 
-          <View style={styles.tabContainer}>
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab;
-              return (
-                <TouchableOpacity
-                  key={tab}
-                  onPress={() => setActiveTab(tab)}
+        <View style={styles.tabContainer}>
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab;
+            return (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                style={[
+                  styles.tab,
+                  isActive && { borderBottomColor: theme.primary },
+                ]}
+              >
+                <Text
                   style={[
-                    styles.tab,
-                    isActive && { borderBottomColor: theme.primary },
+                    styles.tabText,
+                    { color: isActive ? theme.primary : theme.sub },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      { color: isActive ? theme.primary : theme.sub },
-                    ]}
-                  >
-                    {tab}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-          <RNScrollView style={styles.content}>
+        <RNScrollView style={styles.content}>
             {activeTab === 'Text' && (
               <View style={styles.section}>
                 <Text
@@ -433,6 +465,47 @@ export const PropertiesPanel: React.FC = () => {
                       <Text style={{ color: theme.text }}>+</Text>
                     </TouchableOpacity>
                   </View>
+                </View>
+              </View>
+            )}
+
+            {activeTab === 'Brushes' && (
+              <View style={styles.section}>
+                <Text
+                  style={[
+                    styles.settingLabel,
+                    { color: theme.text, marginBottom: 16 },
+                  ]}
+                >
+                  Brush Presets
+                </Text>
+                <View style={styles.brushGrid}>
+                  {brushPresets.map((preset) => {
+                    const isActive = state.selectedTool === preset.id;
+                    return (
+                      <TouchableOpacity
+                        key={preset.id}
+                        onPress={() => handlePresetSelect(preset)}
+                        style={[
+                          styles.brushCard,
+                          {
+                            backgroundColor: isActive ? theme.primary : theme.card,
+                            borderColor: theme.border,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.brushIcon}>{preset.icon}</Text>
+                        <Text
+                          style={[
+                            styles.brushName,
+                            { color: isActive ? '#fff' : theme.text },
+                          ]}
+                        >
+                          {preset.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
             )}
@@ -1022,62 +1095,63 @@ export const PropertiesPanel: React.FC = () => {
         </Animated.View>
 
         {/* Persistent Bottom Tool Menu */}
-        <View
-          style={[
-            styles.bottomToolbar,
-            { backgroundColor: theme.panel, borderTopColor: theme.border },
-          ]}
-        >
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.toolsScroll}
-            style={{ flex: 1, width: '100%' }}
+        {!isEmbedded && (
+          <View
+            style={[
+              styles.bottomToolbar,
+              { backgroundColor: theme.panel, borderTopColor: theme.border },
+            ]}
           >
-            {allTools.map((tool) => {
-              const isActive = state.selectedTool === tool.id;
-              return (
-                <TouchableOpacity
-                  key={tool.id}
-                  style={styles.bottomTool}
-                  onPress={() => {
-                    dispatch({ type: 'SET_TOOL', tool: tool.id });
-                    // Always show properties when a tool is selected, except for the 'select' tool
-                    if (!state.showProperties && tool.id !== 'select') {
-                      dispatch({ type: 'SET_SHOW_PROPERTIES', show: true });
-                    }
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.bottomToolIconContainer,
-                      isActive && { backgroundColor: theme.primary },
-                    ]}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.toolsScroll}
+              style={{ flex: 1, width: '100%' }}
+            >
+              {allTools.map((tool) => {
+                const isActive = state.selectedTool === tool.id;
+                return (
+                  <TouchableOpacity
+                    key={tool.id}
+                    style={styles.bottomTool}
+                    onPress={() => {
+                      dispatch({ type: 'SET_TOOL', tool: tool.id });
+                      // Always show properties when a tool is selected, except for the 'select' tool
+                      if (!state.showProperties && tool.id !== 'select') {
+                        dispatch({ type: 'SET_SHOW_PROPERTIES', show: true });
+                      }
+                    }}
                   >
-                    <Text
+                    <View
                       style={[
-                        styles.bottomToolIcon,
-                        { color: isActive ? '#fff' : theme.text },
+                        styles.bottomToolIconContainer,
+                        isActive && { backgroundColor: theme.primary },
                       ]}
                     >
-                      {tool.icon}
+                      <Text
+                        style={[
+                          styles.bottomToolIcon,
+                          { color: isActive ? '#fff' : theme.text },
+                        ]}
+                      >
+                        {tool.icon}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.bottomToolLabel,
+                        { color: isActive ? theme.primary : theme.text },
+                      ]}
+                    >
+                      {tool.label}
                     </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.bottomToolLabel,
-                      { color: isActive ? theme.primary : theme.text },
-                    ]}
-                  >
-                    {tool.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
       </View>
-    </>
   );
 };
 
@@ -1087,24 +1161,27 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 420,
+    height: 400,
     zIndex: 1000,
   },
+  embeddedOuterContainer: {
+    flex: 1,
+    width: '100%',
+  },
   propertiesContainer: {
-    position: 'absolute',
-    bottom: 90,
-    left: 0,
-    right: 0,
-    height: 330,
+    flex: 1,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     borderTopWidth: 1,
-    paddingTop: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 20,
+    shadowOpacity: 0.1,
+    shadowRadius: 15,
+    elevation: 10,
+  },
+  embeddedPropertiesContainer: {
+    flex: 1,
+    width: '100%',
   },
   editButtonText: {
     fontSize: 16,
@@ -1171,11 +1248,36 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   colorCircle: {
-    width: 32,
-    height: 32,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    margin: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  brushGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -6,
+  },
+  brushCard: {
+    width: '30%',
+    aspectRatio: 1,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    margin: '1.5%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
+  },
+  brushIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  brushName: {
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   settingLabel: {
     fontSize: 14,

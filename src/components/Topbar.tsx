@@ -5,78 +5,36 @@ import { elementsToSVG } from '../utils/svgGenerator';
 
 export const Topbar: React.FC = () => {
   const { state, dispatch, theme, onSave } = useSmartCanvas();
-
-  const canUndo = state.past.length > 0;
-  const canRedo = state.future.length > 0;
-
   const { width, height } = useWindowDimensions();
 
   const handleSave = () => {
     if (onSave) {
-      const svg = elementsToSVG(state.elements, width, height);
-      onSave({ elements: state.elements, svg });
+      // Flatten elements for SVG generation
+      const allElements = state.layers.flatMap((l) =>
+        l.elements.map((el) => ({ ...el, opacity: el.opacity * l.opacity }))
+      );
+      const svg = elementsToSVG(allElements, width, height);
+      onSave({ elements: allElements, svg });
     }
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
+    <View style={styles.container}>
       <View style={styles.leftGroup}>
-        <TouchableOpacity style={styles.iconButton}>
-          <Text style={[styles.icon, { color: theme.text }]}>←</Text>
+        <TouchableOpacity
+          style={[styles.menuButton, { backgroundColor: theme.card, borderColor: theme.border }]}
+          onPress={() => dispatch({ type: 'TOGGLE_SIDEBAR' })}
+        >
+          <Text style={[styles.icon, { color: theme.text }]}>☰</Text>
         </TouchableOpacity>
-
-        <View style={styles.undoRedoGroup}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => dispatch({ type: 'UNDO' })}
-            disabled={!canUndo}
-          >
-            <Text
-              style={[
-                styles.icon,
-                { color: theme.text, opacity: canUndo ? 1 : 0.3 },
-              ]}
-            >
-              ↶
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => dispatch({ type: 'REDO' })}
-            disabled={!canRedo}
-          >
-            <Text
-              style={[
-                styles.icon,
-                { color: theme.text, opacity: canRedo ? 1 : 0.3 },
-              ]}
-            >
-              ↷
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
       <View style={styles.rightGroup}>
-        <TouchableOpacity style={styles.iconButton}>
-          <Text style={[styles.icon, { color: theme.text }]}>≡</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconButton}>
-          <Text style={[styles.icon, { color: theme.text }]}>•••</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity
-          style={[styles.saveButton, { borderColor: theme.primary }]}
+          style={[styles.saveButton, { backgroundColor: theme.primary }]}
           onPress={handleSave}
         >
-          <Text style={[styles.saveText, { color: theme.primary }]}>Save</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.exportButton, { backgroundColor: theme.primary }]}
-          onPress={() => dispatch({ type: 'TOGGLE_DARK_MODE' })}
-        >
-          <Text style={styles.exportText}>Export</Text>
+          <Text style={styles.saveText}>Save</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -85,11 +43,12 @@ export const Topbar: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: {
-    height: 60,
+    height: 80,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    paddingTop: 40,
     position: 'absolute',
     top: 0,
     left: 0,
@@ -100,50 +59,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  undoRedoGroup: {
-    flexDirection: 'row',
-    marginLeft: 12,
-  },
   rightGroup: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  menuButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   icon: {
-    fontSize: 22,
-    fontWeight: '600',
-  },
-  exportButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-    marginLeft: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  exportText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 14,
+    fontSize: 24,
   },
   saveButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginLeft: 8,
-    borderWidth: 1.5,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   saveText: {
+    color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 15,
   },
 });
