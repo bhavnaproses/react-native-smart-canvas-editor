@@ -1,12 +1,22 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { useSmartCanvas } from '../Provider';
+import { elementsToSVG } from '../utils/svgGenerator';
 
 export const Topbar: React.FC = () => {
-  const { state, dispatch, theme } = useSmartCanvas();
+  const { state, dispatch, theme, onSave } = useSmartCanvas();
 
   const canUndo = state.past.length > 0;
   const canRedo = state.future.length > 0;
+
+  const { width, height } = useWindowDimensions();
+
+  const handleSave = () => {
+    if (onSave) {
+      const svg = elementsToSVG(state.elements, width, height);
+      onSave({ elements: state.elements, svg });
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: 'transparent' }]}>
@@ -53,6 +63,13 @@ export const Topbar: React.FC = () => {
         </TouchableOpacity>
         <TouchableOpacity style={styles.iconButton}>
           <Text style={[styles.icon, { color: theme.text }]}>•••</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.saveButton, { borderColor: theme.primary }]}
+          onPress={handleSave}
+        >
+          <Text style={[styles.saveText, { color: theme.primary }]}>Save</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -113,6 +130,19 @@ const styles = StyleSheet.create({
   },
   exportText: {
     color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  saveButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginLeft: 8,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveText: {
     fontWeight: '700',
     fontSize: 14,
   },

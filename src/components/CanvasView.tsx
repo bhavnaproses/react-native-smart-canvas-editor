@@ -51,7 +51,13 @@ const RenderElement = React.memo(
 
     const font = useMemo(() => {
       if (el.type !== 'text') return null;
-      return Skia.Font(undefined, el.fontSize || 20);
+      try {
+        // Use undefined for the default typeface, which is compatible with SkTypeface | undefined
+        return Skia.Font(undefined, el.fontSize || 20);
+      } catch (e) {
+        console.error('Font creation failed', e);
+        return null;
+      }
     }, [el.type, el.fontSize]);
 
     if (el.opacity === 0) return null;
@@ -383,10 +389,10 @@ export const CanvasView: React.FC = () => {
             element: {
               id: Math.random().toString(36).substr(2, 9),
               type: 'text',
-              text: 'New Text',
+              text: stateRef.current.activeText,
               x: e.x,
               y: e.y,
-              fontSize: 24,
+              fontSize: stateRef.current.activeFontSize,
               color: stateRef.current.activeColor,
               strokeWidth: 2,
               opacity: 1,

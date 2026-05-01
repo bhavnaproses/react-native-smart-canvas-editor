@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import { getTheme, type Theme } from './theme';
+import { parseSVGToElements } from './utils/svgParser';
 
 interface Element {
   id: string;
@@ -46,6 +47,9 @@ interface State {
   activeOpacity: number;
   activeBlur: number;
   activeRoughness: number;
+  activeText: string;
+  activeFontSize: number;
+  activeFontFamily: string;
   showGrid: boolean;
   gridSize: number;
 }
@@ -81,6 +85,9 @@ type Action =
         activeOpacity: number;
         activeBlur: number;
         activeRoughness: number;
+        activeText: string;
+        activeFontSize: number;
+        activeFontFamily: string;
       }>;
     };
 
@@ -98,6 +105,9 @@ const initialState: State = {
   activeOpacity: 1,
   activeBlur: 3,
   activeRoughness: 0,
+  activeText: 'New Text',
+  activeFontSize: 24,
+  activeFontFamily: 'system-ui',
   showGrid: false,
   gridSize: 20,
 };
@@ -107,6 +117,7 @@ const SmartCanvasContext = createContext<
       state: State;
       dispatch: React.Dispatch<Action>;
       theme: Theme;
+      onSave?: (data: { elements: Element[]; svg: string }) => void;
     }
   | undefined
 >(undefined);
@@ -251,11 +262,24 @@ export const SmartCanvasProvider: React.FC<{
   children: React.ReactNode;
   darkMode?: boolean;
   backgroundColor?: string;
-}> = ({ children, darkMode, backgroundColor }) => {
+  initialElements?: Element[];
+  initialSvg?: string;
+  onSave?: (data: { elements: Element[]; svg: string }) => void;
+}> = ({
+  children,
+  darkMode,
+  backgroundColor,
+  initialElements,
+  initialSvg,
+  onSave,
+}) => {
   const [state, dispatch] = useReducer(canvasReducer, {
     ...initialState,
     isDarkMode: darkMode !== undefined ? darkMode : initialState.isDarkMode,
     canvasBackground: backgroundColor || initialState.canvasBackground,
+    elements: initialSvg
+      ? parseSVGToElements(initialSvg)
+      : initialElements || initialState.elements,
   });
 
   React.useEffect(() => {
@@ -267,7 +291,7 @@ export const SmartCanvasProvider: React.FC<{
   const theme = useMemo(() => getTheme(state.isDarkMode), [state.isDarkMode]);
 
   return (
-    <SmartCanvasContext.Provider value={{ state, dispatch, theme }}>
+    <SmartCanvasContext.Provider value={{ state, dispatch, theme, onSave }}>
       {children}
     </SmartCanvasContext.Provider>
   );

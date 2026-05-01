@@ -44,6 +44,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = (props) => {
     <SmartCanvasProvider
       darkMode={props.darkMode}
       backgroundColor={props.backgroundColor}
+      initialElements={props.initialElements}
+      initialSvg={props.initialSvg}
+      onSave={props.onSave}
     >
       <EditorLayout {...props} />
     </SmartCanvasProvider>

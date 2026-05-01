@@ -5,6 +5,7 @@ import {
   Text,
   TouchableOpacity,
   ScrollView as RNScrollView,
+  TextInput,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Animated, {
@@ -68,6 +69,12 @@ export const PropertiesPanel: React.FC = () => {
 
     return ['Style', 'Stroke', 'Arrange', 'Canvas'];
   }, [selectedElement, state.selectedTool]);
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.includes(activeTab)) {
+      setActiveTab(tabs[0]!);
+    }
+  }, [tabs, activeTab]);
 
   const updateProperty = (updates: any) => {
     if (selectedElement) {
@@ -161,6 +168,28 @@ export const PropertiesPanel: React.FC = () => {
     }
   };
 
+  const handleTextChange = (text: string) => {
+    if (showElementProperties) {
+      updateProperty({ text });
+    } else {
+      dispatch({
+        type: 'SET_ACTIVE_PROPERTY',
+        updates: { activeText: text },
+      });
+    }
+  };
+
+  const handleFontSizeChange = (fontSize: number) => {
+    if (showElementProperties) {
+      updateProperty({ fontSize });
+    } else {
+      dispatch({
+        type: 'SET_ACTIVE_PROPERTY',
+        updates: { activeFontSize: fontSize },
+      });
+    }
+  };
+
   const allTools = [
     { id: 'select', icon: '🎯', label: 'Select' },
     { id: 'pen', icon: '✏️', label: 'Pencil' },
@@ -249,20 +278,18 @@ export const PropertiesPanel: React.FC = () => {
                   ]}
                 >
                   {/* Simplified text input for now as it's a demo */}
-                  <TouchableOpacity
-                    onPress={() => {
-                      // In a real app, this would open a text input or prompt
-                      const newText = 'Updated Text';
-                      if (showElementProperties)
-                        updateProperty({ text: newText });
-                    }}
-                  >
-                    <Text style={{ color: theme.text }}>
-                      {showElementProperties
-                        ? selectedElement?.text || 'New Text'
-                        : 'New Text'}
-                    </Text>
-                  </TouchableOpacity>
+                  <TextInput
+                    style={[styles.textInput, { color: theme.text }]}
+                    value={
+                      showElementProperties
+                        ? selectedElement?.text || ''
+                        : state.activeText
+                    }
+                    onChangeText={handleTextChange}
+                    placeholder="Enter text..."
+                    placeholderTextColor={theme.sub}
+                    multiline
+                  />
                 </View>
 
                 <View style={[styles.sliderGroup, { marginTop: 24 }]}>
@@ -271,7 +298,7 @@ export const PropertiesPanel: React.FC = () => {
                       Font Size
                     </Text>
                     <Text style={[styles.settingValue, { color: theme.text }]}>
-                      {showElementProperties ? selectedElement.fontSize : 24}px
+                      {showElementProperties ? selectedElement.fontSize : state.activeFontSize}px
                     </Text>
                   </View>
                   <View style={styles.controlsRow}>
@@ -280,11 +307,8 @@ export const PropertiesPanel: React.FC = () => {
                         const current =
                           showElementProperties && selectedElement?.fontSize
                             ? selectedElement.fontSize
-                            : 24;
-                        if (showElementProperties)
-                          updateProperty({
-                            fontSize: Math.max(8, current - 2),
-                          });
+                            : state.activeFontSize;
+                        handleFontSizeChange(Math.max(8, current - 2));
                       }}
                       style={styles.stepButton}
                     >
@@ -295,7 +319,7 @@ export const PropertiesPanel: React.FC = () => {
                         style={[
                           styles.progress,
                           {
-                            width: `${(((showElementProperties ? selectedElement?.fontSize || 24 : 24) - 8) / 64) * 100}%`,
+                            width: `${(((showElementProperties ? selectedElement?.fontSize || state.activeFontSize : state.activeFontSize) - 8) / 64) * 100}%`,
                             backgroundColor: theme.primary,
                           },
                         ]}
@@ -306,11 +330,8 @@ export const PropertiesPanel: React.FC = () => {
                         const current =
                           showElementProperties && selectedElement?.fontSize
                             ? selectedElement.fontSize
-                            : 24;
-                        if (showElementProperties)
-                          updateProperty({
-                            fontSize: Math.min(72, current + 2),
-                          });
+                            : state.activeFontSize;
+                        handleFontSizeChange(Math.min(72, current + 2));
                       }}
                       style={styles.stepButton}
                     >
@@ -1266,6 +1287,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minHeight: 45,
     justifyContent: 'center',
+  },
+  textInput: {
+    fontSize: 16,
+    padding: 0,
+    minHeight: 24,
   },
   shapeToggleRow: {
     flexDirection: 'row',
